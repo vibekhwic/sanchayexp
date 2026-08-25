@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+  h1, h2, h3, h4, .font-display {
+    font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  }
+}
+
+/* Custom smooth transitions for interactive cards and buttons */
+.btn-interactive {
+  transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.btn-interactive:hover {
+  transform: translateY(-1px) scale(1.02);
+}
+.btn-interactive:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.chip-interactive {
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.chip-interactive:hover {
+  transform: translateY(-1px) scale(1.02);
+}
+.chip-interactive:active {
+  transform: scale(0.97);
+}
+
+.card-interactive {
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+.card-interactive:hover {
+  transform: translateY(-2px);
+}
+

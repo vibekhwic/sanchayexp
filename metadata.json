@@ -1,0 +1,6 @@
+{
+  "name": "Sanchay",
+  "description": "Personal finance and investment planning app tailored for Nepal — automated wealth plans, emergency fund tracking, SIP & FD allocation, and loan payoff strategies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
