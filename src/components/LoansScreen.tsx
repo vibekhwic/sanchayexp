@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LoanItem, OnboardingData } from '../types';
-import { simulateLoanPayoff, formatNPR } from '../utils/calculations';
+import { simulateLoanPayoff, formatNPR, calculateLoanEMI, calculateLoanInterestRate } from '../utils/calculations';
 import { NEPALI_BANKS } from '../data/nepaliFinancialData';
 import { 
   CreditCard, 
@@ -15,7 +15,9 @@ import {
   Clock, 
   HelpCircle,
   Building2,
-  DollarSign
+  DollarSign,
+  Edit2,
+  Calculator
 } from 'lucide-react';
 
 interface LoansScreenProps {
@@ -33,9 +35,10 @@ export const LoansScreen: React.FC<LoansScreenProps> = ({
   const [strategy, setStrategy] = useState<'avalanche' | 'snowball'>('avalanche');
   const [extraPrepayAmount, setExtraPrepayAmount] = useState<number>(3000);
   const [isAddLoanModalOpen, setIsAddLoanModalOpen] = useState<boolean>(false);
+  const [editingLoanId, setEditingLoanId] = useState<string | null>(null);
   const [selectedLoanId, setSelectedLoanId] = useState<string>(loans[0]?.id || '');
 
-  // New Loan Form State
+  // New / Edit Loan Form State
   const [newLoanName, setNewLoanName] = useState('');
   const [newLoanType, setNewLoanType] = useState<LoanItem['type']>('Personal Loan');
   const [newLoanBank, setNewLoanBank] = useState('Nabil Bank');
@@ -43,6 +46,94 @@ export const LoansScreen: React.FC<LoansScreenProps> = ({
   const [newLoanRate, setNewLoanRate] = useState('14.5');
   const [newLoanEMI, setNewLoanEMI] = useState('');
   const [newLoanTenure, setNewLoanTenure] = useState('18');
+  const [formLastEdited, setFormLastEdited] = useState<'rate' | 'emi'>('rate');
+
+  const handleOpenAddModal = () => {
+    setEditingLoanId(null);
+    setNewLoanName('');
+    setNewLoanType('Personal Loan');
+    setNewLoanBank('Nabil Bank');
+    setNewLoanBalance('');
+    setNewLoanRate('14.5');
+    setNewLoanEMI('');
+    setNewLoanTenure('18');
+    setFormLastEdited('rate');
+    setIsAddLoanModalOpen(true);
+  };
+
+  const handleOpenEditModal = (loan: LoanItem) => {
+    setEditingLoanId(loan.id);
+    setNewLoanName(loan.name);
+    setNewLoanType(loan.type);
+    setNewLoanBank(loan.bankName);
+    setNewLoanBalance(String(loan.balance));
+    setNewLoanRate(String(loan.interestRate));
+    setNewLoanEMI(String(loan.monthlyEMI));
+    setNewLoanTenure(String(loan.remainingTenureMonths));
+    setFormLastEdited('rate');
+    setIsAddLoanModalOpen(true);
+  };
+
+  const handleBalanceChange = (val: string) => {
+    setNewLoanBalance(val);
+    const p = Number(val);
+    const n = Number(newLoanTenure);
+    const r = Number(newLoanRate);
+    const emi = Number(newLoanEMI);
+
+    if (p > 0 && n > 0) {
+      if (formLastEdited === 'rate' && r > 0) {
+        setNewLoanEMI(String(calculateLoanEMI(p, r, n)));
+      } else if (formLastEdited === 'emi' && emi > 0) {
+        const calcRate = calculateLoanInterestRate(p, emi, n);
+        if (calcRate > 0) setNewLoanRate(String(calcRate));
+      }
+    }
+  };
+
+  const handleRateChange = (val: string) => {
+    setNewLoanRate(val);
+    setFormLastEdited('rate');
+    const r = Number(val);
+    const p = Number(newLoanBalance);
+    const n = Number(newLoanTenure);
+
+    if (p > 0 && n > 0 && r >= 0) {
+      setNewLoanEMI(String(calculateLoanEMI(p, r, n)));
+    }
+  };
+
+  const handleEMIChange = (val: string) => {
+    setNewLoanEMI(val);
+    setFormLastEdited('emi');
+    const emi = Number(val);
+    const p = Number(newLoanBalance);
+    const n = Number(newLoanTenure);
+
+    if (p > 0 && n > 0 && emi > 0) {
+      const calcRate = calculateLoanInterestRate(p, emi, n);
+      if (calcRate > 0) {
+        setNewLoanRate(String(calcRate));
+      }
+    }
+  };
+
+  const handleTenureChange = (val: string) => {
+    setNewLoanTenure(val);
+    const n = Number(val);
+    const p = Number(newLoanBalance);
+    const r = Number(newLoanRate);
+    const emi = Number(newLoanEMI);
+
+    if (p > 0 && n > 0) {
+      if (formLastEdited === 'rate' && r > 0) {
+        setNewLoanEMI(String(calculateLoanEMI(p, r, n)));
+      } else if (formLastEdited === 'emi' && emi > 0) {
+        const calcRate = calculateLoanInterestRate(p, emi, n);
+        if (calcRate > 0) setNewLoanRate(String(calcRate));
+      }
+    }
+  };
 
   const payoffSim = simulateLoanPayoff(loans, extraPrepayAmount);
   const activePlan = strategy === 'avalanche' ? payoffSim.avalanche : payoffSim.snowball;
@@ -53,19 +144,43 @@ export const LoansScreen: React.FC<LoansScreenProps> = ({
 
   const handleAddLoanSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newLoanName || !newLoanBalance || !newLoanEMI) return;
-    const item: LoanItem = {
-      id: `loan-${Date.now()}`,
-      name: newLoanName,
-      type: newLoanType,
-      bankName: newLoanBank,
-      balance: Number(newLoanBalance),
-      interestRate: Number(newLoanRate),
-      monthlyEMI: Number(newLoanEMI),
-      remainingTenureMonths: Number(newLoanTenure)
-    };
-    onUpdateLoans([...loans, item]);
+    if (!newLoanName || !newLoanBalance) return;
+    const p = Number(newLoanBalance);
+    const r = Number(newLoanRate);
+    const n = Number(newLoanTenure) || 12;
+    let emi = Number(newLoanEMI);
+
+    if (p > 0 && n > 0 && (!emi || emi === 0) && r > 0) {
+      emi = calculateLoanEMI(p, r, n);
+    }
+
+    if (editingLoanId) {
+      onUpdateLoans(loans.map(l => l.id === editingLoanId ? {
+        ...l,
+        name: newLoanName,
+        type: newLoanType,
+        bankName: newLoanBank,
+        balance: p,
+        interestRate: r,
+        monthlyEMI: emi,
+        remainingTenureMonths: n
+      } : l));
+    } else {
+      const item: LoanItem = {
+        id: `loan-${Date.now()}`,
+        name: newLoanName,
+        type: newLoanType,
+        bankName: newLoanBank,
+        balance: p,
+        interestRate: r,
+        monthlyEMI: emi,
+        remainingTenureMonths: n
+      };
+      onUpdateLoans([...loans, item]);
+    }
+
     setIsAddLoanModalOpen(false);
+    setEditingLoanId(null);
     setNewLoanName('');
     setNewLoanBalance('');
     setNewLoanEMI('');
@@ -96,7 +211,7 @@ export const LoansScreen: React.FC<LoansScreenProps> = ({
 
         <button
           id="loans-add-btn"
-          onClick={() => setIsAddLoanModalOpen(true)}
+          onClick={handleOpenAddModal}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-black text-white text-xs font-bold shadow-xs hover:scale-102 transition-all cursor-pointer self-start sm:self-auto"
         >
           <Plus className="w-4 h-4 text-[#6C5CE7]" />
@@ -301,10 +416,21 @@ export const LoansScreen: React.FC<LoansScreenProps> = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        handleOpenEditModal(loan);
+                      }}
+                      className="text-gray-300 hover:text-white p-1 transition-colors cursor-pointer"
+                      title={isNp ? 'ऋण सम्पादन गर्नुहोस्' : 'Edit Loan'}
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         handleDeleteLoan(loan.id);
                       }}
                       className="text-gray-400 hover:text-rose-400 p-1 transition-colors cursor-pointer"
-                      title="Delete Loan"
+                      title={isNp ? 'ऋण मेटाउनुहोस्' : 'Delete Loan'}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -317,11 +443,15 @@ export const LoansScreen: React.FC<LoansScreenProps> = ({
         </div>
       </div>
 
-      {/* Add Loan Modal */}
+      {/* Add / Edit Loan Modal */}
       {isAddLoanModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-[20px] p-6 max-w-md w-full shadow-2xl border border-gray-100 space-y-4">
-            <h3 className="text-lg font-bold text-gray-900">Add Loan / Debt Obligation</h3>
+            <h3 className="text-lg font-bold text-gray-900">
+              {editingLoanId 
+                ? (isNp ? 'ऋण सम्पादन गर्नुहोस्' : 'Edit Loan / Debt') 
+                : (isNp ? 'नयाँ ऋण थप्नुहोस्' : 'Add Loan / Debt Obligation')}
+            </h3>
 
             <form onSubmit={handleAddLoanSubmit} className="space-y-3.5">
               <div>
@@ -367,43 +497,93 @@ export const LoansScreen: React.FC<LoansScreenProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Balance (NPR)</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {isNp ? 'बाँकी साँवा (Balance NPR)' : 'Balance (Principal NPR)'}
+                  </label>
                   <input
                     type="number"
                     required
-                    placeholder="150000"
+                    placeholder="e.g. 70000"
                     value={newLoanBalance}
-                    onChange={(e) => setNewLoanBalance(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold outline-none"
+                    onChange={(e) => handleBalanceChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold outline-none focus:border-[#6C5CE7]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Interest %</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {isNp ? 'बाँकी अवधि (महिना)' : 'Tenure (Months)'}
+                  </label>
                   <input
                     type="number"
-                    step="0.1"
                     required
-                    placeholder="14.5"
+                    placeholder="e.g. 18"
+                    value={newLoanTenure}
+                    onChange={(e) => handleTenureChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold outline-none focus:border-[#6C5CE7]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-gray-700">
+                      {isNp ? 'ब्याज दर (% p.a.)' : 'Interest Rate (% p.a.)'}
+                    </label>
+                    <span className="text-[9px] font-bold text-[#6C5CE7] bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
+                      {formLastEdited === 'emi' ? '⚡ Auto-sync' : 'Input / Auto'}
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="e.g. 10.0"
                     value={newLoanRate}
-                    onChange={(e) => setNewLoanRate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold text-rose-600 outline-none"
+                    onChange={(e) => handleRateChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold text-rose-600 outline-none focus:border-[#6C5CE7]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">EMI (NPR)</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-gray-700">
+                      {isNp ? 'मासिक किस्ता (EMI NPR)' : 'Monthly EMI (NPR)'}
+                    </label>
+                    <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">
+                      {formLastEdited === 'rate' ? '⚡ Auto-sync' : 'Input / Auto'}
+                    </span>
+                  </div>
                   <input
                     type="number"
                     required
-                    placeholder="8500"
+                    placeholder="e.g. 4203"
                     value={newLoanEMI}
-                    onChange={(e) => setNewLoanEMI(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold outline-none"
+                    onChange={(e) => handleEMIChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-bold outline-none focus:border-[#6C5CE7]"
                   />
                 </div>
+              </div>
+
+              {/* Real-time Math helper */}
+              <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 space-y-1.5 text-xs text-indigo-950">
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Calculator className="w-3.5 h-3.5 text-[#6C5CE7] flex-shrink-0" />
+                  <span>
+                    {isNp 
+                      ? 'साँवा, ब्याज र महिनाबाट किस्ता (EMI) वा किस्ताबाट ब्याज दर स्वतः हिसाब हुन्छ।' 
+                      : 'Principal + Interest Rate + Months auto-fills EMI. Principal + EMI + Months auto-fills Interest Rate.'}
+                  </span>
+                </div>
+                {Number(newLoanBalance) > 0 && Number(newLoanEMI) > 0 && Number(newLoanTenure) > 0 && (
+                  <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900 pt-1 border-t border-indigo-100">
+                    <span>Total Payoff: {formatNPR(Number(newLoanEMI) * Number(newLoanTenure))}</span>
+                    <span className="text-rose-600">Total Interest: {formatNPR(Math.max(0, (Number(newLoanEMI) * Number(newLoanTenure)) - Number(newLoanBalance)))}</span>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
@@ -418,7 +598,9 @@ export const LoansScreen: React.FC<LoansScreenProps> = ({
                   type="submit"
                   className="px-5 py-2.5 rounded-xl bg-[#6C5CE7] hover:bg-[#5b4cc4] text-white text-xs font-bold shadow-xs hover:scale-102 transition-all cursor-pointer"
                 >
-                  Save Loan
+                  {editingLoanId 
+                    ? (isNp ? 'ऋण अद्यावधिक गर्नुहोस्' : 'Update Loan') 
+                    : (isNp ? 'ऋण सुरक्षित गर्नुहोस्' : 'Save Loan')}
                 </button>
               </div>
             </form>

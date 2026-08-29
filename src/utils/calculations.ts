@@ -317,6 +317,68 @@ function calculateAmortization(sortedLoans: LoanItem[], extraMonthly: number) {
   };
 }
 
+/**
+ * Automatically calculates monthly EMI from Principal, Annual Interest Rate (%) and Tenure (Months).
+ * Standard reducing balance formula: EMI = [P * r * (1+r)^n] / [(1+r)^n - 1]
+ */
+export function calculateLoanEMI(principal: number, annualRatePct: number, tenureMonths: number): number {
+  const p = Number(principal);
+  const rPct = Number(annualRatePct);
+  const n = Number(tenureMonths);
+
+  if (!p || p <= 0 || !n || n <= 0) return 0;
+  if (!rPct || rPct <= 0) {
+    return Math.round(p / n);
+  }
+
+  const i = (rPct / 100) / 12;
+  const factor = Math.pow(1 + i, n);
+  if (!isFinite(factor) || factor <= 1) {
+    return Math.round(p / n);
+  }
+
+  const emi = (p * i * factor) / (factor - 1);
+  return Math.round(emi);
+}
+
+/**
+ * Automatically calculates Annual Interest Rate (%) from Principal, Monthly EMI, and Tenure (Months).
+ * Solves the annuity present value equation using fast-converging binary search.
+ */
+export function calculateLoanInterestRate(principal: number, monthlyEMI: number, tenureMonths: number): number {
+  const p = Number(principal);
+  const emi = Number(monthlyEMI);
+  const n = Number(tenureMonths);
+
+  if (!p || p <= 0 || !emi || emi <= 0 || !n || n <= 0) {
+    return 0;
+  }
+
+  // If total payment is less than or equal to principal, interest is 0%
+  if (emi * n <= p) {
+    return 0;
+  }
+
+  let low = 0.00001; // ~0.012% annual
+  let high = 1.0;    // 1200% annual
+
+  for (let iter = 0; iter < 50; iter++) {
+    const mid = (low + high) / 2;
+    // PV = emi * [1 - (1 + mid)^(-n)] / mid
+    const pv = (emi * (1 - Math.pow(1 + mid, -n))) / mid;
+    if (pv > p) {
+      // PV is too high => discount rate is too low
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  const mid = (low + high) / 2;
+  const annualPct = mid * 12 * 100;
+  return Number(annualPct.toFixed(2));
+}
+
 export function calculateCompoundGrowth(monthlySIP: number, annualRatePct: number, years: number = 10) {
   const r = (annualRatePct / 100) / 12;
   const data = [];

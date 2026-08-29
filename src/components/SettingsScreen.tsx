@@ -11,7 +11,8 @@ import {
   ShieldCheck, 
   ChevronRight,
   CheckCircle2,
-  FileSpreadsheet
+  FileSpreadsheet,
+  LogOut
 } from 'lucide-react';
 import { NEPALI_BANKS } from '../data/nepaliFinancialData';
 
@@ -22,6 +23,7 @@ interface SettingsScreenProps {
   onReopenOnboarding: () => void;
   onOpenDematGuide: () => void;
   onResetData: () => void;
+  onLogout: () => void;
   language: 'en' | 'np';
   onToggleLanguage: () => void;
 }
@@ -33,6 +35,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onReopenOnboarding,
   onOpenDematGuide,
   onResetData,
+  onLogout,
   language,
   onToggleLanguage
 }) => {
@@ -90,14 +93,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </div>
         </div>
 
-        <button
-          id="settings-reopen-questionnaire-btn"
-          onClick={onReopenOnboarding}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-[#6C5CE7] border border-indigo-100 text-xs font-bold transition-all hover:scale-102 cursor-pointer self-start sm:self-auto"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Edit Financial Questionnaire</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            id="settings-reopen-questionnaire-btn"
+            onClick={onReopenOnboarding}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-[#6C5CE7] border border-indigo-100 text-xs font-bold transition-all hover:scale-102 cursor-pointer"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>{isNp ? 'प्रश्नावली सम्पादन' : 'Edit Questionnaire'}</span>
+          </button>
+
+          <button
+            id="settings-profile-logout-btn"
+            onClick={onLogout}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold transition-all hover:scale-102 cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>{isNp ? 'लगआउट' : 'Log Out'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Settings Grid */}
@@ -274,6 +288,39 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           </div>
         </div>
 
+      </div>
+
+      {/* Account Security & Session Management Section */}
+      <div className="bg-white rounded-[20px] p-6 border border-gray-100 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center flex-shrink-0 shadow-xs">
+            <LogOut className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-gray-900">
+                {isNp ? 'खाता तथा सत्र व्यवस्थापन (Account & Session)' : 'Account & Active Session'}
+              </h3>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                Active
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {isNp 
+                ? `तपाईं ${user.email || user.name || 'लगइन प्रयोगकर्ता'} को रूपमा लगइन हुनुहुन्छ। आवश्यकता अनुसार लगआउट गर्न सक्नुहुन्छ।` 
+                : `Signed in as ${user.email || user.name || 'Verified Nepali Investor'}. Log out to end session or switch accounts.`}
+            </p>
+          </div>
+        </div>
+
+        <button
+          id="settings-logout-btn"
+          onClick={onLogout}
+          className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs hover:scale-102 transition-all cursor-pointer self-start sm:self-auto"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>{isNp ? 'सञ्चय नेपालबाट लगआउट' : 'Log Out of Sanchay Nepal'}</span>
+        </button>
       </div>
 
     </div>

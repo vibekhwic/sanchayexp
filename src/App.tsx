@@ -261,6 +261,22 @@ export default function App() {
     setLanguage(prev => (prev === 'en' ? 'np' : 'en'));
   };
 
+  const handleLogout = () => {
+    const loggedOutUser: UserProfile = {
+      id: '',
+      name: '',
+      email: '',
+      isLoggedIn: false,
+      hasCompletedOnboarding: false,
+      language
+    };
+    setUser(loggedOutUser);
+    try {
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(loggedOutUser));
+    } catch {}
+    setCurrentScreen('auth');
+  };
+
   const handleResetData = () => {
     setOnboardingData(INITIAL_ONBOARDING_STATE);
     setExpenses(INITIAL_EXPENSES);
@@ -309,6 +325,7 @@ export default function App() {
         onOpenDematGuide={() => setIsDematModalOpen(true)}
         language={language}
         onToggleLanguage={handleToggleLanguage}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
@@ -373,6 +390,7 @@ export default function App() {
             }}
             onOpenDematGuide={() => setIsDematModalOpen(true)}
             onResetData={handleResetData}
+            onLogout={handleLogout}
             language={language}
             onToggleLanguage={handleToggleLanguage}
           />

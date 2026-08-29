@@ -10,7 +10,8 @@ import {
   BookOpen,
   Sparkles,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  LogOut
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -21,6 +22,7 @@ interface NavbarProps {
   onOpenDematGuide: () => void;
   language: 'en' | 'np';
   onToggleLanguage: () => void;
+  onLogout?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -30,7 +32,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   hasDemat,
   onOpenDematGuide,
   language,
-  onToggleLanguage
+  onToggleLanguage,
+  onLogout
 }) => {
   const isNp = language === 'np';
 
@@ -123,6 +126,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               {isNp ? '🇳🇵 NP' : '🇬🇧 EN'}
             </button>
+
+            {/* Quick Logout Button */}
+            {onLogout && (
+              <button
+                id="nav-logout-btn"
+                onClick={onLogout}
+                className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 transition-all cursor-pointer"
+                title={isNp ? 'लगआउट' : 'Log Out'}
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
 
             {/* User Greeting & Avatar Badge */}
             <div 

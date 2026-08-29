@@ -11,7 +11,15 @@ import {
   LoanItem
 } from '../types';
 import { NEPALI_BANKS, FINANCIAL_GLOSSARY } from '../data/nepaliFinancialData';
-import { calculateRiskScore, calculateEmergencyFundTarget, calculateSurplus, generateWealthPlan, formatNPR } from '../utils/calculations';
+import { 
+  calculateRiskScore, 
+  calculateEmergencyFundTarget, 
+  calculateSurplus, 
+  generateWealthPlan, 
+  formatNPR,
+  calculateLoanEMI,
+  calculateLoanInterestRate
+} from '../utils/calculations';
 import { 
   ArrowRight, 
   ArrowLeft, 
@@ -28,7 +36,8 @@ import {
   Calendar,
   DollarSign,
   PiggyBank,
-  Check
+  Check,
+  Calculator
 } from 'lucide-react';
 
 interface OnboardingFlowProps {
@@ -159,6 +168,78 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ initialData, onC
       ...prev,
       loans: prev.loans.map(l => l.id === loanId ? { ...l, ...updates } : l)
     }));
+  };
+
+  // Track whether the user last edited 'rate' or 'emi' for each loan
+  const [loanEditMode, setLoanEditMode] = useState<Record<string, 'rate' | 'emi'>>({});
+
+  const handleLoanBalanceChange = (loanId: string, rawVal: string) => {
+    const principal = rawVal === '' ? 0 : Number(rawVal);
+    const loan = data.loans.find(l => l.id === loanId);
+    if (!loan) return;
+
+    const mode = loanEditMode[loanId] || 'rate';
+    const updates: Partial<LoanItem> = { balance: principal };
+
+    if (principal > 0 && loan.remainingTenureMonths > 0) {
+      if (mode === 'rate' && loan.interestRate > 0) {
+        updates.monthlyEMI = calculateLoanEMI(principal, loan.interestRate, loan.remainingTenureMonths);
+      } else if (mode === 'emi' && loan.monthlyEMI > 0) {
+        const calcRate = calculateLoanInterestRate(principal, loan.monthlyEMI, loan.remainingTenureMonths);
+        if (calcRate > 0) updates.interestRate = calcRate;
+      }
+    }
+    handleUpdateLoan(loanId, updates);
+  };
+
+  const handleLoanRateChange = (loanId: string, rawVal: string) => {
+    const rate = rawVal === '' ? 0 : Number(rawVal);
+    const loan = data.loans.find(l => l.id === loanId);
+    if (!loan) return;
+
+    setLoanEditMode(prev => ({ ...prev, [loanId]: 'rate' }));
+    const updates: Partial<LoanItem> = { interestRate: rate };
+
+    if (loan.balance > 0 && loan.remainingTenureMonths > 0 && rate > 0) {
+      updates.monthlyEMI = calculateLoanEMI(loan.balance, rate, loan.remainingTenureMonths);
+    }
+    handleUpdateLoan(loanId, updates);
+  };
+
+  const handleLoanEMIChange = (loanId: string, rawVal: string) => {
+    const emi = rawVal === '' ? 0 : Number(rawVal);
+    const loan = data.loans.find(l => l.id === loanId);
+    if (!loan) return;
+
+    setLoanEditMode(prev => ({ ...prev, [loanId]: 'emi' }));
+    const updates: Partial<LoanItem> = { monthlyEMI: emi };
+
+    if (loan.balance > 0 && loan.remainingTenureMonths > 0 && emi > 0) {
+      const calcRate = calculateLoanInterestRate(loan.balance, emi, loan.remainingTenureMonths);
+      if (calcRate > 0) {
+        updates.interestRate = calcRate;
+      }
+    }
+    handleUpdateLoan(loanId, updates);
+  };
+
+  const handleLoanTenureChange = (loanId: string, rawVal: string) => {
+    const months = rawVal === '' ? 0 : Number(rawVal);
+    const loan = data.loans.find(l => l.id === loanId);
+    if (!loan) return;
+
+    const mode = loanEditMode[loanId] || 'rate';
+    const updates: Partial<LoanItem> = { remainingTenureMonths: months };
+
+    if (loan.balance > 0 && months > 0) {
+      if (mode === 'rate' && loan.interestRate > 0) {
+        updates.monthlyEMI = calculateLoanEMI(loan.balance, loan.interestRate, months);
+      } else if (mode === 'emi' && loan.monthlyEMI > 0) {
+        const calcRate = calculateLoanInterestRate(loan.balance, loan.monthlyEMI, months);
+        if (calcRate > 0) updates.interestRate = calcRate;
+      }
+    }
+    handleUpdateLoan(loanId, updates);
   };
 
   return (
@@ -940,47 +1021,91 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ initialData, onC
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Outstanding Balance (NPR)</label>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          {isNp ? 'बाँकी साँवा (Outstanding Principal NPR)' : 'Outstanding Balance (NPR)'}
+                        </label>
                         <input
                           type="number"
-                          value={loan.balance}
-                          onChange={(e) => handleUpdateLoan(loan.id, { balance: Number(e.target.value) || 0 })}
-                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 outline-none"
+                          placeholder="e.g. 70000"
+                          value={loan.balance === 0 ? '' : loan.balance}
+                          onChange={(e) => handleLoanBalanceChange(loan.id, e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 outline-none focus:border-[#6C5CE7]"
                         />
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Interest Rate (% p.a.)</label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-semibold text-slate-600">
+                            {isNp ? 'ब्याज दर (% p.a.)' : 'Interest Rate (% p.a.)'}
+                          </label>
+                          <span className="text-[9px] font-bold text-[#6C5CE7] bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
+                            {loanEditMode[loan.id] === 'emi' ? '⚡ Auto-syncs' : 'Input / Auto'}
+                          </span>
+                        </div>
                         <input
                           type="number"
-                          step="0.1"
-                          value={loan.interestRate}
-                          onChange={(e) => handleUpdateLoan(loan.id, { interestRate: Number(e.target.value) || 0 })}
-                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-rose-600 outline-none"
+                          step="0.01"
+                          placeholder="e.g. 10.0"
+                          value={loan.interestRate === 0 ? '' : loan.interestRate}
+                          onChange={(e) => handleLoanRateChange(loan.id, e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-rose-600 outline-none focus:border-[#6C5CE7]"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Monthly EMI (NPR)</label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-semibold text-slate-600">
+                            {isNp ? 'मासिक किस्ता (Monthly EMI)' : 'Monthly EMI (NPR)'}
+                          </label>
+                          <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">
+                            {loanEditMode[loan.id] === 'rate' || !loanEditMode[loan.id] ? '⚡ Auto-syncs' : 'Input / Auto'}
+                          </span>
+                        </div>
                         <input
                           type="number"
-                          value={loan.monthlyEMI}
-                          onChange={(e) => handleUpdateLoan(loan.id, { monthlyEMI: Number(e.target.value) || 0 })}
-                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 outline-none"
+                          placeholder="e.g. 4203"
+                          value={loan.monthlyEMI === 0 ? '' : loan.monthlyEMI}
+                          onChange={(e) => handleLoanEMIChange(loan.id, e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 outline-none focus:border-[#6C5CE7]"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Remaining Tenure (Months)</label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-semibold text-slate-600">
+                            {isNp ? 'बाँकी अवधि (महिना)' : 'Remaining Tenure (Months)'}
+                          </label>
+                          <span className="text-[9px] font-medium text-slate-500">Months</span>
+                        </div>
                         <input
                           type="number"
-                          value={loan.remainingTenureMonths}
-                          onChange={(e) => handleUpdateLoan(loan.id, { remainingTenureMonths: Number(e.target.value) || 0 })}
-                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 outline-none"
+                          placeholder="e.g. 18"
+                          value={loan.remainingTenureMonths === 0 ? '' : loan.remainingTenureMonths}
+                          onChange={(e) => handleLoanTenureChange(loan.id, e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800 outline-none focus:border-[#6C5CE7]"
                         />
                       </div>
+                    </div>
+
+                    {/* Auto-Calculation Real-Time Indicator */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-indigo-50/70 border border-indigo-100/90 text-[11px]">
+                      <div className="flex items-center gap-1.5 text-indigo-950 font-medium">
+                        <Calculator className="w-3.5 h-3.5 text-[#6C5CE7] flex-shrink-0" />
+                        <span>
+                          {isNp
+                            ? 'साँवा, ब्याज र महिना हाल्दा किस्ता (EMI) वा साँवा, किस्ता र महिना हाल्दा ब्याज स्वतः हिसाब हुन्छ।'
+                            : 'Enter Principal, Rate & Months to auto-compute EMI — or enter Principal, EMI & Months to auto-compute Rate.'}
+                        </span>
+                      </div>
+                      {loan.balance > 0 && loan.remainingTenureMonths > 0 && loan.monthlyEMI > 0 && (
+                        <div className="flex items-center gap-2 text-[10px] font-bold text-indigo-900 bg-white px-2 py-0.5 rounded-lg border border-indigo-100 flex-shrink-0">
+                          <span>Total: {formatNPR(loan.monthlyEMI * loan.remainingTenureMonths)}</span>
+                          <span className="text-slate-300">•</span>
+                          <span className="text-rose-600">Interest: {formatNPR(Math.max(0, (loan.monthlyEMI * loan.remainingTenureMonths) - loan.balance))}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
