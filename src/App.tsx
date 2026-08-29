@@ -333,10 +333,15 @@ export default function App() {
           <ExpensesScreen
             expenses={expenses}
             incomes={incomes}
+            loans={onboardingData.loans}
             onAddExpense={handleAddExpense}
             onDeleteExpense={handleDeleteExpense}
             onAddIncome={handleAddIncome}
             onDeleteIncome={handleDeleteIncome}
+            onNavigate={(scr) => {
+              setCurrentScreen(scr);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
             language={language}
           />
         )}

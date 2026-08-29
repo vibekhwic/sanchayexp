@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ExpenseItem, IncomeItem } from '../types';
+import { ExpenseItem, IncomeItem, LoanItem, ScreenType } from '../types';
 import { formatNPR } from '../utils/calculations';
 import { NEPALI_BANKS } from '../data/nepaliFinancialData';
 import { 
@@ -20,7 +20,9 @@ import {
   Coffee, 
   GraduationCap, 
   MoreHorizontal,
-  DollarSign
+  DollarSign,
+  CreditCard,
+  ArrowUpRight
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -39,10 +41,12 @@ import {
 interface ExpensesScreenProps {
   expenses: ExpenseItem[];
   incomes: IncomeItem[];
+  loans?: LoanItem[];
   onAddExpense: (expense: Omit<ExpenseItem, 'id'>) => void;
   onDeleteExpense: (id: string) => void;
   onAddIncome: (income: Omit<IncomeItem, 'id'>) => void;
   onDeleteIncome: (id: string) => void;
+  onNavigate?: (screen: ScreenType) => void;
   language: 'en' | 'np';
 }
 
@@ -55,6 +59,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Family & Remittance': '#E84393',
   'Leisure & Dining': '#FD79A8',
   'Education': '#A29BFE',
+  'Debt & Loan EMI': '#E17055',
   'Other': '#B2BEC3'
 };
 
@@ -67,23 +72,35 @@ const CATEGORY_ICONS: Record<string, any> = {
   'Family & Remittance': Users,
   'Leisure & Dining': Coffee,
   'Education': GraduationCap,
+  'Debt & Loan EMI': CreditCard,
   'Other': MoreHorizontal
 };
 
 export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
   expenses,
   incomes,
+  loans = [],
   onAddExpense,
   onDeleteExpense,
   onAddIncome,
   onDeleteIncome,
+  onNavigate,
   language
 }) => {
   const isNp = language === 'np';
-  const [activeTab, setActiveTab] = useState<'all' | 'essential' | 'non_essential' | 'incomes'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'essential' | 'non_essential' | 'loans' | 'incomes'>('all');
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [isAddIncomeOpen, setIsAddIncomeOpen] = useState(false);
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
+
+  // Active Loans calculation
+  const activeLoans = useMemo(() => loans || [], [loans]);
+  const totalLoanEMI = useMemo(() => {
+    return activeLoans.reduce((sum, l) => sum + (Number(l.monthlyEMI) || 0), 0);
+  }, [activeLoans]);
+  const totalDebtBalance = useMemo(() => {
+    return activeLoans.reduce((sum, l) => sum + (Number(l.balance) || 0), 0);
+  }, [activeLoans]);
 
   // New Expense form state
   const [expTitle, setExpTitle] = useState('');
@@ -116,23 +133,25 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
   };
 
   // Immediate recomputation from props with numerical coercion safety
-  const totalExpense = useMemo(() => {
+  const totalLivingExpenses = useMemo(() => {
     return expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
   }, [expenses]);
+
+  const totalMonthlyOutgoings = totalLivingExpenses + totalLoanEMI;
 
   const totalIncome = useMemo(() => {
     return incomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
   }, [incomes]);
 
-  const netSavings = totalIncome - totalExpense;
+  const netSavings = totalIncome - totalMonthlyOutgoings;
 
   const essentialExpense = useMemo(() => {
     return expenses
       .filter(e => e.isEssential)
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  }, [expenses]);
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0) + totalLoanEMI;
+  }, [expenses, totalLoanEMI]);
 
-  const discretionaryExpense = Math.max(0, totalExpense - essentialExpense);
+  const discretionaryExpense = Math.max(0, totalMonthlyOutgoings - essentialExpense);
 
   // Category totals for Pie Chart
   const pieData = useMemo(() => {
@@ -142,20 +161,25 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
       categoryMap[e.category] = (categoryMap[e.category] || 0) + amt;
     });
 
+    if (totalLoanEMI > 0) {
+      categoryMap['Debt & Loan EMI'] = (categoryMap['Debt & Loan EMI'] || 0) + totalLoanEMI;
+    }
+
     return Object.keys(categoryMap).map(cat => ({
       name: cat,
       value: categoryMap[cat],
       color: CATEGORY_COLORS[cat] || '#6C5CE7'
     }));
-  }, [expenses]);
+  }, [expenses, totalLoanEMI]);
 
   // Trend data comparison
   const barData = useMemo(() => [
     { name: isNp ? 'आम्दानी' : 'Income', amount: totalIncome, fill: '#00B894' },
     { name: isNp ? 'अनिवार्य' : 'Essentials', amount: essentialExpense, fill: '#6C5CE7' },
+    ...(totalLoanEMI > 0 ? [{ name: isNp ? 'ऋण किस्ता' : 'Loan EMI', amount: totalLoanEMI, fill: '#E17055' }] : []),
     { name: isNp ? 'मनोरञ्जन' : 'Leisure', amount: discretionaryExpense, fill: '#FD79A8' },
-    { name: isNp ? 'बचत' : 'Surplus', amount: Math.max(0, netSavings), fill: '#0984E3' }
-  ], [totalIncome, essentialExpense, discretionaryExpense, netSavings, isNp]);
+    { name: isNp ? 'खुद बचत' : 'Surplus', amount: Math.max(0, netSavings), fill: '#0984E3' }
+  ], [totalIncome, essentialExpense, totalLoanEMI, discretionaryExpense, netSavings, isNp]);
 
   const handleExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -293,30 +317,68 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
 
         <div id="card-total-expenses" className="p-5 rounded-[20px] bg-white border border-gray-100 shadow-xs transition-all">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-semibold text-gray-400">Total Expenses Logged</span>
+            <span className="text-xs font-semibold text-gray-400">
+              {totalLoanEMI > 0 ? (isNp ? 'मासिक कुल दायित्व (खर्च + EMI)' : 'Total Monthly Outgoings') : (isNp ? 'कुल दर्ता खर्च' : 'Total Expenses Logged')}
+            </span>
             <span className="w-2 h-2 rounded-full bg-rose-500"></span>
           </div>
           <div className="text-2xl font-bold text-rose-500 tracking-tight">
-            {formatNPR(totalExpense)}
+            {formatNPR(totalMonthlyOutgoings)}
           </div>
           <span className="text-[11px] text-gray-500 mt-1 block">
-            Essentials: {formatNPR(essentialExpense)} ({totalExpense > 0 ? Math.round((essentialExpense / totalExpense) * 100) : 0}%)
+            {totalLoanEMI > 0 
+              ? `Living: ${formatNPR(totalLivingExpenses)} • Debt EMI: ${formatNPR(totalLoanEMI)}`
+              : `Essentials: ${formatNPR(essentialExpense)} (${totalMonthlyOutgoings > 0 ? Math.round((essentialExpense / totalMonthlyOutgoings) * 100) : 0}%)`}
           </span>
         </div>
 
         <div id="card-net-surplus" className="p-5 rounded-[20px] bg-white border border-gray-100 shadow-xs transition-all">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-semibold text-gray-400">Net Monthly Surplus</span>
+            <span className="text-xs font-semibold text-gray-400">{isNp ? 'खुद मासिक बचत' : 'Net Monthly Surplus'}</span>
             <span className={`w-2 h-2 rounded-full ${netSavings >= 0 ? 'bg-[#6C5CE7]' : 'bg-rose-600'}`}></span>
           </div>
           <div className={`text-2xl font-bold tracking-tight ${netSavings >= 0 ? 'text-[#6C5CE7]' : 'text-rose-600'}`}>
             {formatNPR(netSavings)}
           </div>
           <span className="text-[11px] text-gray-500 mt-1 block">
-            {netSavings >= 0 ? 'Available for SIP & wealth building' : 'Deficit: expenses exceed inflows'}
+            {netSavings >= 0 ? (isNp ? 'एसआईपी र सम्पत्ति निर्माणका लागि उपलब्ध' : 'Available for SIP & wealth building') : (isNp ? 'घाटा: आम्दानी भन्दा खर्च धेरै' : 'Deficit: outgoings exceed inflows')}
           </span>
         </div>
       </div>
+
+      {/* Active Debt / EMI Synchronized Banner */}
+      {totalLoanEMI > 0 && (
+        <div className="p-4 rounded-2xl bg-indigo-50/70 border border-indigo-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#6C5CE7] text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+              <CreditCard className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="font-bold text-gray-900 flex items-center gap-2">
+                <span>{isNp ? 'सक्रिय ऋण किस्ता (EMI) जोडिएको छ' : 'Active Debt Obligation Connected'}</span>
+                <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-bold">
+                  {activeLoans.length} {activeLoans.length === 1 ? (isNp ? 'ऋण' : 'Active Loan') : (isNp ? 'ऋणहरू' : 'Active Loans')}
+                </span>
+              </div>
+              <p className="text-gray-600 mt-0.5">
+                {isNp 
+                  ? `मासिक रू ${totalLoanEMI.toLocaleString('en-IN')} किस्ता (EMI) तपाईंको कुल ऋण रू ${totalDebtBalance.toLocaleString('en-IN')} बाट यहाँ समावेश गरिएको छ।`
+                  : `Monthly ${formatNPR(totalLoanEMI)} EMI is factored into your cashflow from your ${formatNPR(totalDebtBalance)} outstanding debt.`}
+              </p>
+            </div>
+          </div>
+
+          {onNavigate && (
+            <button
+              onClick={() => onNavigate('loans')}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white border border-indigo-200 text-indigo-700 font-bold hover:bg-indigo-100/60 transition-all shrink-0 cursor-pointer self-start sm:self-auto shadow-xs"
+            >
+              <span>{isNp ? 'ऋण मुक्ति रणनीति हेर्नुहोस्' : 'Manage in Loan Payoff'}</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Charts Section: Category Donut & Cashflow Bar Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-6">
@@ -405,49 +467,99 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
           </h3>
 
           {/* Filter Segmented Control */}
-          <div className="flex items-center gap-1 p-1 rounded-full bg-gray-100 text-xs self-start sm:self-auto">
+          <div className="flex items-center gap-1 p-1 rounded-full bg-gray-100 text-xs self-start sm:self-auto overflow-x-auto max-w-full">
             <button
               id="filter-tab-all"
               onClick={() => setActiveTab('all')}
-              className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer ${
+              className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'all' ? 'bg-[#6C5CE7] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              All ({expenses.length})
+              {isNp ? 'सबै' : 'All'} ({expenses.length + (totalLoanEMI > 0 ? activeLoans.length : 0)})
             </button>
             <button
               id="filter-tab-essentials"
               onClick={() => setActiveTab('essential')}
-              className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer ${
+              className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'essential' ? 'bg-[#6C5CE7] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Essentials
+              {isNp ? 'अनिवार्य' : 'Essentials'}
             </button>
             <button
               id="filter-tab-discretionary"
               onClick={() => setActiveTab('non_essential')}
-              className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer ${
+              className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'non_essential' ? 'bg-[#6C5CE7] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Discretionary
+              {isNp ? 'वैकल्पिक / रहर' : 'Discretionary'}
             </button>
+            {activeLoans.length > 0 && (
+              <button
+                id="filter-tab-loans"
+                onClick={() => setActiveTab('loans')}
+                className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                  activeTab === 'loans' ? 'bg-[#6C5CE7] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {isNp ? 'ऋण किस्ता' : 'Loan EMIs'} ({activeLoans.length})
+              </button>
+            )}
             <button
               id="filter-tab-incomes"
               onClick={() => setActiveTab('incomes')}
-              className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer ${
+              className={`px-3.5 py-1 rounded-full font-semibold transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === 'incomes' ? 'bg-[#6C5CE7] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Inflows ({incomes.length})
+              {isNp ? 'आम्दानी' : 'Inflows'} ({incomes.length})
             </button>
           </div>
         </div>
 
         {/* Items List */}
         <div className="divide-y divide-gray-100">
-          {activeTab === 'incomes' ? (
+          {activeTab === 'loans' ? (
+            activeLoans.length === 0 ? (
+              <div className="py-12 text-center text-gray-400 space-y-3">
+                <p className="text-xs">{isNp ? 'कुनै ऋण दायित्व छैन।' : 'No active loan commitments.'}</p>
+              </div>
+            ) : (
+              activeLoans.map(loan => (
+                <div key={loan.id} className="py-3 flex items-center justify-between hover:bg-gray-50/50 px-2 rounded-xl transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold shrink-0">
+                      <CreditCard className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs sm:text-sm font-bold text-gray-900 flex items-center gap-2">
+                        <span>{loan.name}</span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-indigo-50 text-[#6C5CE7]">
+                          Active Loan EMI
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        {loan.bankName} • Rate: {loan.interestRate}% • Balance: {formatNPR(loan.balance)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs sm:text-sm font-bold text-rose-600">-{formatNPR(loan.monthlyEMI)}/mo</span>
+                    {onNavigate && (
+                      <button
+                        onClick={() => onNavigate('loans')}
+                        className="text-xs text-[#6C5CE7] hover:underline font-bold px-2 py-1 cursor-pointer flex items-center gap-1"
+                      >
+                        <span>{isNp ? 'रणनीति' : 'Strategy'}</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )
+          ) : activeTab === 'incomes' ? (
             incomes.length === 0 ? (
               <div className="py-12 text-center text-gray-400 space-y-3">
                 <p className="text-xs">{isNp ? 'कुनै आम्दानी दर्ता गरिएको छैन।' : 'No income streams logged yet.'}</p>
@@ -488,67 +600,104 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
               ))
             )
           ) : (
-            filteredExpenses.length === 0 ? (
-              <div className="py-12 text-center text-gray-400 space-y-3">
-                <p className="text-xs">
-                  {isNp ? 'यस विधामा कुनै खर्च भेटिएन।' : 'No expenses recorded in this category.'}
-                </p>
-                <button
-                  onClick={() => setIsAddExpenseOpen(true)}
-                  className="px-4 py-1.5 rounded-xl bg-indigo-50 text-[#6C5CE7] text-xs font-bold hover:bg-indigo-100 transition-all cursor-pointer"
-                >
-                  + {isNp ? 'खर्च थप्नुहोस्' : 'Log an Expense'}
-                </button>
-              </div>
-            ) : (
-              filteredExpenses.map(exp => {
-                const Icon = CATEGORY_ICONS[exp.category] || MoreHorizontal;
-                const color = CATEGORY_COLORS[exp.category] || '#6C5CE7';
-                return (
-                  <div key={exp.id} className="py-3 flex items-center justify-between hover:bg-gray-50/50 px-2 rounded-xl transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div 
-                        className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-xs shrink-0"
-                        style={{ backgroundColor: color }}
-                      >
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs sm:text-sm font-bold text-gray-900 flex items-center gap-2">
-                          <span>{exp.title}</span>
-                          {exp.isEssential ? (
-                            <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-gray-100 text-gray-600">
-                              Essential
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-pink-50 text-pink-600">
-                              Leisure
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[11px] text-gray-500">
-                          {exp.category} • Paid via {exp.paymentMethod} • {exp.date}
-                        </div>
-                      </div>
+            <>
+              {/* Show Loan EMIs in All or Essential tabs */}
+              {(activeTab === 'all' || activeTab === 'essential') && activeLoans.map(loan => (
+                <div key={`loan-obligation-${loan.id}`} className="py-3 flex items-center justify-between hover:bg-gray-50/50 px-2 rounded-xl transition-colors bg-indigo-50/20">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold shrink-0">
+                      <CreditCard className="w-4 h-4" />
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs sm:text-sm font-bold text-gray-900">-{formatNPR(exp.amount)}</span>
-                      <button
-                        onClick={() => {
-                          onDeleteExpense(exp.id);
-                          setLastActionMessage(isNp ? `खर्च हटाइयो` : `Expense "${exp.title}" removed.`);
-                          setTimeout(() => setLastActionMessage(null), 3000);
-                        }}
-                        title="Delete expense entry"
-                        className="text-gray-400 hover:text-rose-500 p-1.5 transition-colors cursor-pointer rounded-lg hover:bg-rose-50"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    <div>
+                      <div className="text-xs sm:text-sm font-bold text-gray-900 flex items-center gap-2">
+                        <span>{loan.name} (EMI)</span>
+                        <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-indigo-100 text-[#6C5CE7]">
+                          Essential Debt Obligation
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        {loan.bankName} • {loan.interestRate}% interest • Outstanding: {formatNPR(loan.balance)}
+                      </div>
                     </div>
                   </div>
-                );
-              })
-            )
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs sm:text-sm font-bold text-rose-600">-{formatNPR(loan.monthlyEMI)}</span>
+                    {onNavigate && (
+                      <button
+                        onClick={() => onNavigate('loans')}
+                        className="text-xs text-[#6C5CE7] hover:underline font-bold px-2 py-1 cursor-pointer flex items-center gap-1"
+                        title="View loan payoff engine"
+                      >
+                        <span>{isNp ? 'रणनीति' : 'Payoff'}</span>
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {filteredExpenses.length === 0 && ((activeTab !== 'all' && activeTab !== 'essential') || activeLoans.length === 0) ? (
+                <div className="py-12 text-center text-gray-400 space-y-3">
+                  <p className="text-xs">
+                    {isNp ? 'यस विधामा कुनै खर्च भेटिएन।' : 'No expenses recorded in this category.'}
+                  </p>
+                  <button
+                    onClick={() => setIsAddExpenseOpen(true)}
+                    className="px-4 py-1.5 rounded-xl bg-indigo-50 text-[#6C5CE7] text-xs font-bold hover:bg-indigo-100 transition-all cursor-pointer"
+                  >
+                    + {isNp ? 'खर्च थप्नुहोस्' : 'Log an Expense'}
+                  </button>
+                </div>
+              ) : (
+                filteredExpenses.map(exp => {
+                  const Icon = CATEGORY_ICONS[exp.category] || MoreHorizontal;
+                  const color = CATEGORY_COLORS[exp.category] || '#6C5CE7';
+                  return (
+                    <div key={exp.id} className="py-3 flex items-center justify-between hover:bg-gray-50/50 px-2 rounded-xl transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div 
+                          className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-xs shrink-0"
+                          style={{ backgroundColor: color }}
+                        >
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs sm:text-sm font-bold text-gray-900 flex items-center gap-2">
+                            <span>{exp.title}</span>
+                            {exp.isEssential ? (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-gray-100 text-gray-600">
+                                Essential
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-pink-50 text-pink-600">
+                                Leisure
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            {exp.category} • Paid via {exp.paymentMethod} • {exp.date}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs sm:text-sm font-bold text-gray-900">-{formatNPR(exp.amount)}</span>
+                        <button
+                          onClick={() => {
+                            onDeleteExpense(exp.id);
+                            setLastActionMessage(isNp ? `खर्च हटाइयो` : `Expense "${exp.title}" removed.`);
+                            setTimeout(() => setLastActionMessage(null), 3000);
+                          }}
+                          title="Delete expense entry"
+                          className="text-gray-400 hover:text-rose-500 p-1.5 transition-colors cursor-pointer rounded-lg hover:bg-rose-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </>
           )}
         </div>
       </div>
@@ -639,6 +788,7 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
                     <option value="Transport">Transport / Fuel</option>
                     <option value="Health">Health & Pharmacy</option>
                     <option value="Family & Remittance">Family Support</option>
+                    <option value="Debt & Loan EMI">Debt & Loan EMI</option>
                     <option value="Leisure & Dining">Leisure & Dining</option>
                     <option value="Education">Education & Courses</option>
                     <option value="Other">Other</option>

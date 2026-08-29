@@ -83,7 +83,7 @@ export interface ExpenseItem {
   id: string;
   title: string;
   amount: number;
-  category: 'Housing' | 'Food & Groceries' | 'Utilities & Net' | 'Transport' | 'Health' | 'Family & Remittance' | 'Leisure & Dining' | 'Education' | 'Other';
+  category: 'Housing' | 'Food & Groceries' | 'Utilities & Net' | 'Transport' | 'Health' | 'Family & Remittance' | 'Leisure & Dining' | 'Education' | 'Debt & Loan EMI' | 'Other';
   date: string;
   isEssential: boolean;
   paymentMethod: string;
