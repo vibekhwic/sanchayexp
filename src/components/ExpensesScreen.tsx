@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { ExpenseItem, IncomeItem } from '../types';
 import { formatNPR } from '../utils/calculations';
+import { NEPALI_BANKS } from '../data/nepaliFinancialData';
 import { 
   Plus, 
   Trash2, 
@@ -82,6 +83,7 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
   const [activeTab, setActiveTab] = useState<'all' | 'essential' | 'non_essential' | 'incomes'>('all');
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [isAddIncomeOpen, setIsAddIncomeOpen] = useState(false);
+  const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
 
   // New Expense form state
   const [expTitle, setExpTitle] = useState('');
@@ -89,75 +91,144 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
   const [expCategory, setExpCategory] = useState<ExpenseItem['category']>('Food & Groceries');
   const [expIsEssential, setExpIsEssential] = useState(true);
   const [expPaymentMethod, setExpPaymentMethod] = useState('Fonepay QR');
+  const [expError, setExpError] = useState<string | null>(null);
 
   // New Income form state
   const [incSource, setIncSource] = useState('');
   const [incAmount, setIncAmount] = useState('');
   const [incBank, setIncBank] = useState('NIC Asia Bank');
+  const [incError, setIncError] = useState<string | null>(null);
 
-  const totalExpense = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const totalIncome = incomes.reduce((sum, i) => sum + i.amount, 0);
+  // Helper to parse localized, formatted, or Nepali numbers (e.g. "1,500", "१५००", "Rs 2000")
+  const parseAmount = (val: string): number => {
+    if (!val) return 0;
+    const nepaliDigits: Record<string, string> = {
+      '०': '0', '१': '1', '२': '2', '३': '3', '४': '4',
+      '५': '5', '६': '6', '७': '7', '८': '8', '९': '9'
+    };
+    let normalized = String(val).trim();
+    for (const [nep, eng] of Object.entries(nepaliDigits)) {
+      normalized = normalized.split(nep).join(eng);
+    }
+    const cleaned = normalized.replace(/[^0-9.]/g, '');
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  // Immediate recomputation from props with numerical coercion safety
+  const totalExpense = useMemo(() => {
+    return expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [expenses]);
+
+  const totalIncome = useMemo(() => {
+    return incomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+  }, [incomes]);
+
   const netSavings = totalIncome - totalExpense;
 
-  const essentialExpense = expenses.filter(e => e.isEssential).reduce((sum, e) => sum + e.amount, 0);
-  const discretionaryExpense = totalExpense - essentialExpense;
+  const essentialExpense = useMemo(() => {
+    return expenses
+      .filter(e => e.isEssential)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [expenses]);
+
+  const discretionaryExpense = Math.max(0, totalExpense - essentialExpense);
 
   // Category totals for Pie Chart
-  const categoryMap: Record<string, number> = {};
-  expenses.forEach(e => {
-    categoryMap[e.category] = (categoryMap[e.category] || 0) + e.amount;
-  });
+  const pieData = useMemo(() => {
+    const categoryMap: Record<string, number> = {};
+    expenses.forEach(e => {
+      const amt = Number(e.amount) || 0;
+      categoryMap[e.category] = (categoryMap[e.category] || 0) + amt;
+    });
 
-  const pieData = Object.keys(categoryMap).map(cat => ({
-    name: cat,
-    value: categoryMap[cat],
-    color: CATEGORY_COLORS[cat] || '#6C5CE7'
-  }));
+    return Object.keys(categoryMap).map(cat => ({
+      name: cat,
+      value: categoryMap[cat],
+      color: CATEGORY_COLORS[cat] || '#6C5CE7'
+    }));
+  }, [expenses]);
 
   // Trend data comparison
-  const barData = [
-    { name: 'Income', amount: totalIncome, fill: '#00B894' },
-    { name: 'Essentials', amount: essentialExpense, fill: '#6C5CE7' },
-    { name: 'Leisure', amount: discretionaryExpense, fill: '#FD79A8' },
-    { name: 'Surplus', amount: Math.max(0, netSavings), fill: '#0984E3' }
-  ];
+  const barData = useMemo(() => [
+    { name: isNp ? 'आम्दानी' : 'Income', amount: totalIncome, fill: '#00B894' },
+    { name: isNp ? 'अनिवार्य' : 'Essentials', amount: essentialExpense, fill: '#6C5CE7' },
+    { name: isNp ? 'मनोरञ्जन' : 'Leisure', amount: discretionaryExpense, fill: '#FD79A8' },
+    { name: isNp ? 'बचत' : 'Surplus', amount: Math.max(0, netSavings), fill: '#0984E3' }
+  ], [totalIncome, essentialExpense, discretionaryExpense, netSavings, isNp]);
 
   const handleExpenseSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!expTitle || !expAmount) return;
+    setExpError(null);
+    const title = expTitle.trim();
+    const amount = parseAmount(expAmount);
+
+    if (!title) {
+      setExpError(isNp ? 'कृपया खर्चको शीर्षक लेख्नुहोस्।' : 'Please enter an expense title.');
+      return;
+    }
+    if (amount <= 0) {
+      setExpError(isNp ? 'कृपया शून्य भन्दा बढी रकम प्रविष्ट गर्नुहोस्।' : 'Please enter a valid amount greater than 0.');
+      return;
+    }
+
     onAddExpense({
-      title: expTitle,
-      amount: Number(expAmount),
+      title,
+      amount,
       category: expCategory,
       date: new Date().toISOString().split('T')[0],
       isEssential: expIsEssential,
       paymentMethod: expPaymentMethod
     });
+
     setExpTitle('');
     setExpAmount('');
+    setExpError(null);
     setIsAddExpenseOpen(false);
+    setActiveTab('all'); // Switch to all expenses so the newly added entry is immediately visible
+    setLastActionMessage(isNp ? `खर्च "रू ${amount.toLocaleString('en-IN')}" सफलतापूर्वक सुरक्षित गरियो!` : `Expense "${title}" (NPR ${amount.toLocaleString('en-IN')}) saved successfully!`);
+    setTimeout(() => setLastActionMessage(null), 4000);
   };
 
   const handleIncomeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!incSource || !incAmount) return;
+    setIncError(null);
+    const source = incSource.trim();
+    const amount = parseAmount(incAmount);
+
+    if (!source) {
+      setIncError(isNp ? 'कृपया आम्दानीको स्रोत लेख्नुहोस्।' : 'Please enter an income source name.');
+      return;
+    }
+    if (amount <= 0) {
+      setIncError(isNp ? 'कृपया शून्य भन्दा बढी रकम प्रविष्ट गर्नुहोस्।' : 'Please enter a valid amount greater than 0.');
+      return;
+    }
+
     onAddIncome({
-      source: incSource,
-      amount: Number(incAmount),
+      source,
+      amount,
       date: new Date().toISOString().split('T')[0],
       isRecurring: true,
-      bank: incBank
+      bank: incBank.trim() || 'NIC Asia Bank'
     });
+
     setIncSource('');
     setIncAmount('');
+    setIncError(null);
     setIsAddIncomeOpen(false);
+    setActiveTab('incomes'); // Switch to inflows tab so the newly added stream is immediately visible
+    setLastActionMessage(isNp ? `आम्दानी स्रोत "रू ${amount.toLocaleString('en-IN')}" थपियो!` : `Income stream "${source}" (NPR ${amount.toLocaleString('en-IN')}) added successfully!`);
+    setTimeout(() => setLastActionMessage(null), 4000);
   };
 
-  const filteredExpenses = expenses.filter(e => {
-    if (activeTab === 'essential') return e.isEssential;
-    if (activeTab === 'non_essential') return !e.isEssential;
-    return true;
-  });
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter(e => {
+      if (activeTab === 'essential') return e.isEssential;
+      if (activeTab === 'non_essential') return !e.isEssential;
+      return true;
+    });
+  }, [expenses, activeTab]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -197,32 +268,53 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
         </div>
       </div>
 
+      {/* Success Notification Alert */}
+      {lastActionMessage && (
+        <div className="flex items-center gap-2 p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-2xl animate-fadeIn">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{lastActionMessage}</span>
+        </div>
+      )}
+
       {/* Summary Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
-        <div className="p-5 rounded-[20px] bg-white border border-gray-100 shadow-xs">
-          <span className="text-xs font-semibold text-gray-400 block mb-1">Total Monthly Inflows</span>
-          <div className="text-2xl font-bold text-emerald-600">
+        <div id="card-total-inflows" className="p-5 rounded-[20px] bg-white border border-gray-100 shadow-xs transition-all">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold text-gray-400">Total Monthly Inflows</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          </div>
+          <div className="text-2xl font-bold text-emerald-600 tracking-tight">
             {formatNPR(totalIncome)}
           </div>
-          <span className="text-[11px] text-gray-500 mt-1 block">{incomes.length} Active income sources</span>
-        </div>
-
-        <div className="p-5 rounded-[20px] bg-white border border-gray-100 shadow-xs">
-          <span className="text-xs font-semibold text-gray-400 block mb-1">Total Expenses Logged</span>
-          <div className="text-2xl font-bold text-rose-500">
-            {formatNPR(totalExpense)}
-          </div>
           <span className="text-[11px] text-gray-500 mt-1 block">
-            Essentials: {formatNPR(essentialExpense)} ({Math.round((essentialExpense / (totalExpense || 1)) * 100)}%)
+            {incomes.length} {incomes.length === 1 ? 'income stream' : 'income streams'} active
           </span>
         </div>
 
-        <div className="p-5 rounded-[20px] bg-white border border-gray-100 shadow-xs">
-          <span className="text-xs font-semibold text-gray-400 block mb-1">Net Monthly Surplus</span>
-          <div className={`text-2xl font-bold ${netSavings >= 0 ? 'text-[#6C5CE7]' : 'text-rose-600'}`}>
+        <div id="card-total-expenses" className="p-5 rounded-[20px] bg-white border border-gray-100 shadow-xs transition-all">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold text-gray-400">Total Expenses Logged</span>
+            <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+          </div>
+          <div className="text-2xl font-bold text-rose-500 tracking-tight">
+            {formatNPR(totalExpense)}
+          </div>
+          <span className="text-[11px] text-gray-500 mt-1 block">
+            Essentials: {formatNPR(essentialExpense)} ({totalExpense > 0 ? Math.round((essentialExpense / totalExpense) * 100) : 0}%)
+          </span>
+        </div>
+
+        <div id="card-net-surplus" className="p-5 rounded-[20px] bg-white border border-gray-100 shadow-xs transition-all">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold text-gray-400">Net Monthly Surplus</span>
+            <span className={`w-2 h-2 rounded-full ${netSavings >= 0 ? 'bg-[#6C5CE7]' : 'bg-rose-600'}`}></span>
+          </div>
+          <div className={`text-2xl font-bold tracking-tight ${netSavings >= 0 ? 'text-[#6C5CE7]' : 'text-rose-600'}`}>
             {formatNPR(netSavings)}
           </div>
-          <span className="text-[11px] text-gray-500 mt-1 block">Available for SIP & FD laddering</span>
+          <span className="text-[11px] text-gray-500 mt-1 block">
+            {netSavings >= 0 ? 'Available for SIP & wealth building' : 'Deficit: expenses exceed inflows'}
+          </span>
         </div>
       </div>
 
@@ -356,73 +448,107 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
         {/* Items List */}
         <div className="divide-y divide-gray-100">
           {activeTab === 'incomes' ? (
-            incomes.map(inc => (
-              <div key={inc.id} className="py-3 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold shrink-0">
-                    <Wallet className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs sm:text-sm font-bold text-gray-900">{inc.source}</div>
-                    <div className="text-[11px] text-gray-500">{inc.bank} • {inc.date}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs sm:text-sm font-bold text-emerald-600">+{formatNPR(inc.amount)}</span>
-                  {incomes.length > 1 && (
-                    <button
-                      onClick={() => onDeleteIncome(inc.id)}
-                      className="text-gray-400 hover:text-rose-500 p-1 transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+            incomes.length === 0 ? (
+              <div className="py-12 text-center text-gray-400 space-y-3">
+                <p className="text-xs">{isNp ? 'कुनै आम्दानी दर्ता गरिएको छैन।' : 'No income streams logged yet.'}</p>
+                <button
+                  onClick={() => setIsAddIncomeOpen(true)}
+                  className="px-4 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold hover:bg-emerald-100 transition-all cursor-pointer"
+                >
+                  + {isNp ? 'पहिलो आम्दानी थप्नुहोस्' : 'Add First Income Stream'}
+                </button>
               </div>
-            ))
-          ) : (
-            filteredExpenses.map(exp => {
-              const Icon = CATEGORY_ICONS[exp.category] || MoreHorizontal;
-              const color = CATEGORY_COLORS[exp.category] || '#6C5CE7';
-              return (
-                <div key={exp.id} className="py-3 flex items-center justify-between">
+            ) : (
+              incomes.map(inc => (
+                <div key={inc.id} className="py-3 flex items-center justify-between hover:bg-gray-50/50 px-2 rounded-xl transition-colors">
                   <div className="flex items-center gap-3">
-                    <div 
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-xs shrink-0"
-                      style={{ backgroundColor: color }}
-                    >
-                      <Icon className="w-4 h-4" />
+                    <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold shrink-0">
+                      <Wallet className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xs sm:text-sm font-bold text-gray-900 flex items-center gap-2">
-                        <span>{exp.title}</span>
-                        {exp.isEssential ? (
-                          <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-gray-100 text-gray-600">
-                            Essential
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-pink-50 text-pink-600">
-                            Leisure
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-gray-500">
-                        {exp.category} • Paid via {exp.paymentMethod} • {exp.date}
-                      </div>
+                      <div className="text-xs sm:text-sm font-bold text-gray-900">{inc.source}</div>
+                      <div className="text-[11px] text-gray-500">{inc.bank} • {inc.date}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs sm:text-sm font-bold text-gray-900">-{formatNPR(exp.amount)}</span>
+                    <span className="text-xs sm:text-sm font-bold text-emerald-600">+{formatNPR(inc.amount)}</span>
                     <button
-                      onClick={() => onDeleteExpense(exp.id)}
-                      className="text-gray-400 hover:text-rose-500 p-1 transition-colors cursor-pointer"
+                      onClick={() => {
+                        onDeleteIncome(inc.id);
+                        setLastActionMessage(isNp ? `आम्दानी हटाइयो` : `Income "${inc.source}" removed.`);
+                        setTimeout(() => setLastActionMessage(null), 3000);
+                      }}
+                      title="Remove income stream"
+                      className="text-gray-400 hover:text-rose-500 p-1.5 transition-colors cursor-pointer rounded-lg hover:bg-rose-50"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
-              );
-            })
+              ))
+            )
+          ) : (
+            filteredExpenses.length === 0 ? (
+              <div className="py-12 text-center text-gray-400 space-y-3">
+                <p className="text-xs">
+                  {isNp ? 'यस विधामा कुनै खर्च भेटिएन।' : 'No expenses recorded in this category.'}
+                </p>
+                <button
+                  onClick={() => setIsAddExpenseOpen(true)}
+                  className="px-4 py-1.5 rounded-xl bg-indigo-50 text-[#6C5CE7] text-xs font-bold hover:bg-indigo-100 transition-all cursor-pointer"
+                >
+                  + {isNp ? 'खर्च थप्नुहोस्' : 'Log an Expense'}
+                </button>
+              </div>
+            ) : (
+              filteredExpenses.map(exp => {
+                const Icon = CATEGORY_ICONS[exp.category] || MoreHorizontal;
+                const color = CATEGORY_COLORS[exp.category] || '#6C5CE7';
+                return (
+                  <div key={exp.id} className="py-3 flex items-center justify-between hover:bg-gray-50/50 px-2 rounded-xl transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div 
+                        className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-xs shrink-0"
+                        style={{ backgroundColor: color }}
+                      >
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs sm:text-sm font-bold text-gray-900 flex items-center gap-2">
+                          <span>{exp.title}</span>
+                          {exp.isEssential ? (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-gray-100 text-gray-600">
+                              Essential
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-pink-50 text-pink-600">
+                              Leisure
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-gray-500">
+                          {exp.category} • Paid via {exp.paymentMethod} • {exp.date}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs sm:text-sm font-bold text-gray-900">-{formatNPR(exp.amount)}</span>
+                      <button
+                        onClick={() => {
+                          onDeleteExpense(exp.id);
+                          setLastActionMessage(isNp ? `खर्च हटाइयो` : `Expense "${exp.title}" removed.`);
+                          setTimeout(() => setLastActionMessage(null), 3000);
+                        }}
+                        title="Delete expense entry"
+                        className="text-gray-400 hover:text-rose-500 p-1.5 transition-colors cursor-pointer rounded-lg hover:bg-rose-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )
           )}
         </div>
       </div>
@@ -431,37 +557,78 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
       {isAddExpenseOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-[20px] p-6 max-w-md w-full shadow-2xl border border-gray-100 space-y-4 animate-fadeIn">
-            <h3 className="text-lg font-bold text-gray-900">Log New Expense</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">
+                {isNp ? 'नयाँ खर्च प्रविष्टि' : 'Log New Expense'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddExpenseOpen(false);
+                  setExpError(null);
+                }}
+                className="text-gray-400 hover:text-gray-600 p-1 text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {expError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">
+                {expError}
+              </div>
+            )}
 
             <form onSubmit={handleExpenseSubmit} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Expense Title</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  {isNp ? 'खर्चको शीर्षक' : 'Expense Title'}
+                </label>
                 <input
+                  id="expense-title-input"
                   type="text"
                   required
                   placeholder="e.g. Bhatbhateni Grocery, Pathao Ride"
                   value={expTitle}
-                  onChange={(e) => setExpTitle(e.target.value)}
+                  onChange={(e) => {
+                    setExpTitle(e.target.value);
+                    if (expError) setExpError(null);
+                  }}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium outline-none focus:border-[#6C5CE7]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Amount (NPR)</label>
-                <input
-                  type="number"
-                  required
-                  placeholder="e.g. 1500"
-                  value={expAmount}
-                  onChange={(e) => setExpAmount(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-900 outline-none focus:border-[#6C5CE7]"
-                />
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  {isNp ? 'रकम (रू NPR)' : 'Amount (NPR)'}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">
+                    रू
+                  </span>
+                  <input
+                    id="expense-amount-input"
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    placeholder="e.g. 1,500"
+                    value={expAmount}
+                    onChange={(e) => {
+                      setExpAmount(e.target.value);
+                      if (expError) setExpError(null);
+                    }}
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-900 outline-none focus:border-[#6C5CE7]"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Category</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {isNp ? 'विधा' : 'Category'}
+                  </label>
                   <select
+                    id="expense-category-select"
                     value={expCategory}
                     onChange={(e) => setExpCategory(e.target.value as any)}
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold outline-none"
@@ -479,8 +646,11 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Payment Channel</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                    {isNp ? 'भुक्तानी माध्यम' : 'Payment Channel'}
+                  </label>
                   <select
+                    id="expense-payment-select"
                     value={expPaymentMethod}
                     onChange={(e) => setExpPaymentMethod(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold outline-none"
@@ -503,24 +673,29 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
                   onChange={(e) => setExpIsEssential(e.target.checked)}
                   className="rounded text-[#6C5CE7] focus:ring-[#6C5CE7]"
                 />
-                <label htmlFor="essential-check" className="text-xs font-semibold text-gray-700">
-                  This is an essential living expense
+                <label htmlFor="essential-check" className="text-xs font-semibold text-gray-700 cursor-pointer">
+                  {isNp ? 'यो अनिवार्य आधारभूत खर्च हो' : 'This is an essential living expense'}
                 </label>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
                 <button
+                  id="cancel-expense-btn"
                   type="button"
-                  onClick={() => setIsAddExpenseOpen(false)}
+                  onClick={() => {
+                    setIsAddExpenseOpen(false);
+                    setExpError(null);
+                  }}
                   className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100 cursor-pointer"
                 >
-                  Cancel
+                  {isNp ? 'रद्द गर्नुहोस्' : 'Cancel'}
                 </button>
                 <button
+                  id="save-expense-btn"
                   type="submit"
                   className="px-5 py-2.5 rounded-xl bg-[#6C5CE7] hover:bg-[#5b4cc4] text-white text-xs font-bold shadow-xs hover:scale-102 transition-all cursor-pointer"
                 >
-                  Save Expense
+                  {isNp ? 'खर्च सुरक्षित गर्नुहोस्' : 'Save Expense'}
                 </button>
               </div>
             </form>
@@ -532,56 +707,109 @@ export const ExpensesScreen: React.FC<ExpensesScreenProps> = ({
       {isAddIncomeOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-[20px] p-6 max-w-md w-full shadow-2xl border border-gray-100 space-y-4 animate-fadeIn">
-            <h3 className="text-lg font-bold text-gray-900">Add Income Stream</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">
+                {isNp ? 'नयाँ आम्दानी स्रोत थप्नुहोस्' : 'Add Income Stream'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddIncomeOpen(false);
+                  setIncError(null);
+                }}
+                className="text-gray-400 hover:text-gray-600 p-1 text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {incError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">
+                {incError}
+              </div>
+            )}
 
             <form onSubmit={handleIncomeSubmit} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Source Name</label>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  {isNp ? 'आम्दानीको स्रोत' : 'Source Name'}
+                </label>
                 <input
+                  id="income-source-input"
                   type="text"
                   required
-                  placeholder="e.g. Salary, Consulting, Bonus, Dividend"
+                  placeholder="e.g. Salary, Consulting, Rental, Dividend"
                   value={incSource}
-                  onChange={(e) => setIncSource(e.target.value)}
+                  onChange={(e) => {
+                    setIncSource(e.target.value);
+                    if (incError) setIncError(null);
+                  }}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium outline-none focus:border-[#6C5CE7]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Monthly Amount (NPR)</label>
-                <input
-                  type="number"
-                  required
-                  placeholder="e.g. 50000"
-                  value={incAmount}
-                  onChange={(e) => setIncAmount(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-emerald-600 outline-none focus:border-[#6C5CE7]"
-                />
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  {isNp ? 'मासिक रकम (रू NPR)' : 'Monthly Amount (NPR)'}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">
+                    रू
+                  </span>
+                  <input
+                    id="income-amount-input"
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    placeholder="e.g. 50,000"
+                    value={incAmount}
+                    onChange={(e) => {
+                      setIncAmount(e.target.value);
+                      if (incError) setIncError(null);
+                    }}
+                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-emerald-600 outline-none focus:border-[#6C5CE7]"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Receiving Bank</label>
-                <input
-                  type="text"
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  {isNp ? 'प्राप्त हुने बैंक' : 'Receiving Bank'}
+                </label>
+                <select
+                  id="income-bank-select"
                   value={incBank}
                   onChange={(e) => setIncBank(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold outline-none"
-                />
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs font-semibold outline-none focus:border-[#6C5CE7]"
+                >
+                  {NEPALI_BANKS.map(bankName => (
+                    <option key={bankName} value={bankName}>
+                      {bankName}
+                    </option>
+                  ))}
+                  <option value="eSewa / Digital Wallet">eSewa / Digital Wallet</option>
+                  <option value="Cash / Other">Cash / Other</option>
+                </select>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
                 <button
+                  id="cancel-income-btn"
                   type="button"
-                  onClick={() => setIsAddIncomeOpen(false)}
+                  onClick={() => {
+                    setIsAddIncomeOpen(false);
+                    setIncError(null);
+                  }}
                   className="px-4 py-2 rounded-xl text-xs font-bold text-gray-600 hover:bg-gray-100 cursor-pointer"
                 >
-                  Cancel
+                  {isNp ? 'रद्द गर्नुहोस्' : 'Cancel'}
                 </button>
                 <button
+                  id="save-income-btn"
                   type="submit"
                   className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs hover:scale-102 transition-all cursor-pointer"
                 >
-                  Add Income
+                  {isNp ? 'आम्दानी सुरक्षित गर्नुहोस्' : 'Add Income'}
                 </button>
               </div>
             </form>

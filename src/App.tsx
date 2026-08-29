@@ -52,20 +52,36 @@ export default function App() {
     return INITIAL_ONBOARDING_STATE;
   });
 
-  // Expenses
+  // Expenses with numerical sanitization
   const [expenses, setExpenses] = useState<ExpenseItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.EXPENSES);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((item: any) => ({
+            ...item,
+            amount: Number(item.amount) || 0
+          }));
+        }
+      }
     } catch {}
     return INITIAL_EXPENSES;
   });
 
-  // Incomes
+  // Incomes with numerical sanitization
   const [incomes, setIncomes] = useState<IncomeItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.INCOMES);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((item: any) => ({
+            ...item,
+            amount: Number(item.amount) || 0
+          }));
+        }
+      }
     } catch {}
     return INITIAL_INCOMES;
   });
@@ -101,6 +117,100 @@ export default function App() {
     } catch {}
   }, [incomes]);
 
+  const handleAddExpense = (newExp: Omit<ExpenseItem, 'id'>) => {
+    const expenseWithId: ExpenseItem = {
+      ...newExp,
+      amount: Number(newExp.amount) || 0,
+      id: `exp-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`
+    };
+    
+    setExpenses(prev => {
+      const updated = [expenseWithId, ...prev];
+      try {
+        localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // Synchronize essential expense changes into onboardingData for unified dashboard calculations
+    setOnboardingData(prev => {
+      const updatedExpenses = [expenseWithId, ...expenses];
+      const essentialsSum = updatedExpenses
+        .filter(e => e.isEssential)
+        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      return {
+        ...prev,
+        monthlyEssentials: essentialsSum > 0 ? essentialsSum : prev.monthlyEssentials
+      };
+    });
+  };
+
+  const handleDeleteExpense = (id: string) => {
+    setExpenses(prev => {
+      const updated = prev.filter(e => e.id !== id);
+      try {
+        localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setOnboardingData(prev => {
+      const updatedExpenses = expenses.filter(e => e.id !== id);
+      const essentialsSum = updatedExpenses
+        .filter(e => e.isEssential)
+        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+      return {
+        ...prev,
+        monthlyEssentials: essentialsSum > 0 ? essentialsSum : prev.monthlyEssentials
+      };
+    });
+  };
+
+  const handleAddIncome = (newInc: Omit<IncomeItem, 'id'>) => {
+    const incomeWithId: IncomeItem = {
+      ...newInc,
+      amount: Number(newInc.amount) || 0,
+      id: `inc-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`
+    };
+
+    setIncomes(prev => {
+      const updated = [incomeWithId, ...prev];
+      try {
+        localStorage.setItem(STORAGE_KEYS.INCOMES, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // Synchronize total income into onboardingData for unified dashboard calculations
+    setOnboardingData(prev => {
+      const updatedIncomes = [incomeWithId, ...incomes];
+      const totalInc = updatedIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+      return {
+        ...prev,
+        monthlyIncome: totalInc > 0 ? totalInc : prev.monthlyIncome
+      };
+    });
+  };
+
+  const handleDeleteIncome = (id: string) => {
+    setIncomes(prev => {
+      const updated = prev.filter(i => i.id !== id);
+      try {
+        localStorage.setItem(STORAGE_KEYS.INCOMES, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    setOnboardingData(prev => {
+      const updatedIncomes = incomes.filter(i => i.id !== id);
+      const totalInc = updatedIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+      return {
+        ...prev,
+        monthlyIncome: totalInc > 0 ? totalInc : prev.monthlyIncome
+      };
+    });
+  };
+
   const handleLoginSuccess = (userUpdates: Partial<UserProfile>, skipOnboarding: boolean = false) => {
     const updatedUser: UserProfile = {
       id: userUpdates.id || 'user-1',
@@ -124,6 +234,26 @@ export default function App() {
       ...prev,
       hasCompletedOnboarding: true
     }));
+    
+    // Also sync the primary salary income stream if completedData specifies monthlyIncome
+    if (completedData.monthlyIncome) {
+      setIncomes(prev => {
+        const salaryIdx = prev.findIndex(i => i.source.toLowerCase().includes('salary') || i.source.toLowerCase().includes('primary'));
+        if (salaryIdx >= 0) {
+          const updated = [...prev];
+          updated[salaryIdx] = {
+            ...updated[salaryIdx],
+            amount: completedData.monthlyIncome
+          };
+          try {
+            localStorage.setItem(STORAGE_KEYS.INCOMES, JSON.stringify(updated));
+          } catch {}
+          return updated;
+        }
+        return prev;
+      });
+    }
+
     setCurrentScreen('dashboard');
   };
 
@@ -135,6 +265,11 @@ export default function App() {
     setOnboardingData(INITIAL_ONBOARDING_STATE);
     setExpenses(INITIAL_EXPENSES);
     setIncomes(INITIAL_INCOMES);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ONBOARDING, JSON.stringify(INITIAL_ONBOARDING_STATE));
+      localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(INITIAL_EXPENSES));
+      localStorage.setItem(STORAGE_KEYS.INCOMES, JSON.stringify(INITIAL_INCOMES));
+    } catch {}
     alert('Reset to default sample data for Kathmandu professional profile!');
   };
 
@@ -198,10 +333,10 @@ export default function App() {
           <ExpensesScreen
             expenses={expenses}
             incomes={incomes}
-            onAddExpense={(newExp) => setExpenses(prev => [{ ...newExp, id: `exp-${Date.now()}` }, ...prev])}
-            onDeleteExpense={(id) => setExpenses(prev => prev.filter(e => e.id !== id))}
-            onAddIncome={(newInc) => setIncomes(prev => [{ ...newInc, id: `inc-${Date.now()}` }, ...prev])}
-            onDeleteIncome={(id) => setIncomes(prev => prev.filter(i => i.id !== id))}
+            onAddExpense={handleAddExpense}
+            onDeleteExpense={handleDeleteExpense}
+            onAddIncome={handleAddIncome}
+            onDeleteIncome={handleDeleteIncome}
             language={language}
           />
         )}
